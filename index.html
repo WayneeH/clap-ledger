@@ -676,6 +676,17 @@
 
   <!-- 新增支出 -->
   <div id="pane-add" style="display:none">
+    <div id="lock-overlay" style="display:none" class="card" style="text-align:center;padding:2.5rem 1.25rem">
+      <div style="text-align:center;padding:2rem 1rem">
+        <div style="font-size:32px;margin-bottom:12px">🔒</div>
+        <div style="font-size:16px;font-weight:500;margin-bottom:8px">結算進行中</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">有人已開始匯款，記帳暫時鎖定。<br>待所有款項結清封存後，即可繼續記帳。</div>
+        <div style="margin-top:1.25rem">
+          <button class="btn btn-primary" onclick="switchTab('settle')">前往結算頁 →</button>
+        </div>
+      </div>
+    </div>
+    <div id="add-form-inner">
     <div class="card">
       <div class="card-title"> 新增支出</div>
 
@@ -734,6 +745,7 @@
       </button>
       <div class="msg" id="add-msg"></div>
     </div>
+    </div>
   </div>
 
   <!-- 帳單記錄 -->
@@ -778,7 +790,7 @@
 
 <script>
 // ─── Firebase State ────────────────────────────────────────
-let state = { members: [], entries: [], paidTransfers: [], archivedRounds: [], categories: ['出遊','軟體訂閱','錄音'], avatarColors: {} };
+let state = { members: [], entries: [], paidTransfers: [], archivedRounds: [], categories: ['出遊','軟體訂閱','錄音'], avatarColors: {}, locked: false };
 let fbReady = false;
 
 function saveState() {
@@ -799,10 +811,11 @@ function initFirebase() {
         paidTransfers: data.paidTransfers || [],
         archivedRounds: data.archivedRounds || [],
         categories: data.categories || ['出遊','軟體訂閱','錄音'],
-        avatarColors: data.avatarColors || {}
+        avatarColors: data.avatarColors || {},
+        locked: data.locked || false
       };
     } else {
-      state = { members: [], entries: [], paidTransfers: [], archivedRounds: [], categories: ['出遊','軟體訂閱','錄音'], avatarColors: {} };
+      state = { members: [], entries: [], paidTransfers: [], archivedRounds: [], categories: ['出遊','軟體訂閱','錄音'], avatarColors: {}, locked: false };
     }
     // 重新渲染目前的 tab
     const activeTab = document.querySelector('.tab.active');
@@ -812,11 +825,34 @@ function initFirebase() {
 }
 
 function refreshCurrentTab(name) {
+  updateLockUI();
   if (name === 'setup') renderMemberList();
-  if (name === 'add') { renderPayerSelect(); renderSplitChips(); renderCatChips(); }
+  if (name === 'add') renderAddPane();
   if (name === 'records') renderRecords();
   if (name === 'settle') renderSettle();
   if (name === 'history') renderHistory();
+}
+
+function updateLockUI() {
+  const locked = state.locked;
+  const addTab = document.getElementById('tab-add');
+  if (addTab) {
+    addTab.style.opacity = locked ? '0.4' : '1';
+    addTab.title = locked ? '結算進行中，暫停記帳' : '';
+  }
+}
+
+function renderAddPane() {
+  const locked = state.locked;
+  const overlay = document.getElementById('lock-overlay');
+  const form = document.getElementById('add-form-inner');
+  if (overlay) overlay.style.display = locked ? 'block' : 'none';
+  if (form) form.style.display = locked ? 'none' : 'block';
+  if (!locked) {
+    renderPayerSelect();
+    renderSplitChips();
+    renderCatChips();
+  }
 }
 
 window.addEventListener('firebase-ready', () => {
@@ -862,7 +898,7 @@ function switchTab(name) {
     document.getElementById('pane-'+t).style.display = t === name ? '' : 'none';
     document.getElementById('tab-'+t).classList.toggle('active', t === name);
   });
-  if (name === 'add') { renderPayerSelect(); renderSplitChips(); renderCatChips(); }
+  if (name === 'add') renderAddPane();
   if (name === 'records') renderRecords();
   if (name === 'settle') renderSettle();
   if (name === 'history') renderHistory();
@@ -988,6 +1024,7 @@ function getSelectedSeason() {
 }
 
 function addEntry() {
+  if (state.locked) { showMsg('add-msg','結算進行中，無法新增帳務','error'); return; }
   const date = document.getElementById('f-date').value;
   const payer = document.getElementById('f-payer').value;
   const desc = document.getElementById('f-desc').value.trim();
@@ -1096,12 +1133,15 @@ function simplifyDebts(bal) {
     if (b > 0.009) pos.push({m, b: +b.toFixed(2)});
     else if (b < -0.009) neg.push({m, b: +(-b).toFixed(2)});
   });
+  // 由大到小排序，確保每次配對結果穩定
+  pos.sort((a,b) => b.b - a.b);
+  neg.sort((a,b) => b.b - a.b);
   const txns = [];
   let pi = 0, ni = 0;
   const p = pos.map(x=>({...x})), n = neg.map(x=>({...x}));
   while (pi < p.length && ni < n.length) {
     const pay = Math.min(p[pi].b, n[ni].b);
-    txns.push({ from: n[ni].m, to: p[pi].m, amount: pay });
+    if (pay > 0.009) txns.push({ from: n[ni].m, to: p[pi].m, amount: +pay.toFixed(0) });
     p[pi].b -= pay; n[ni].b -= pay;
     if (p[pi].b < 0.009) pi++;
     if (n[ni].b < 0.009) ni++;
@@ -1222,15 +1262,19 @@ function markPaid(idx) {
   const t = {...txns[idx]};
   t.date = new Date().toLocaleDateString('zh-TW');
   state.paidTransfers.push(t);
+  state.locked = true;  // 第一筆匯款開始 → 鎖定記帳
   saveState();
   renderSettle();
+  updateLockUI();
 }
 
 function undoPaid(idx) {
   if (!state.paidTransfers) return;
   state.paidTransfers.splice(idx, 1);
+  if (state.paidTransfers.length === 0) state.locked = false;  // 全部復原 → 解鎖
   saveState();
   renderSettle();
+  updateLockUI();
 }
 
 function archiveRound() {
@@ -1247,8 +1291,10 @@ function archiveRound() {
   });
   state.entries = [];
   state.paidTransfers = [];
+  state.locked = false;  // 封存完成 → 解鎖
   saveState();
   renderSettle();
+  updateLockUI();
 }
 
 function renderHistory() {
@@ -1339,7 +1385,7 @@ function exportCSV() {
 }
 
 function clearAll() {
-  state = { members: [], entries: [], paidTransfers: [], archivedRounds: [], categories: ['出遊','軟體訂閱','錄音'], avatarColors: {} };
+  state = { members: [], entries: [], paidTransfers: [], archivedRounds: [], categories: ['出遊','軟體訂閱','錄音'], avatarColors: {}, locked: false };
   saveState();
   renderMemberList();
   switchTab('setup');
@@ -1368,6 +1414,7 @@ renderMemberList();
 renderPayerSelect();
 renderSplitChips();
 renderCatChips();
+updateLockUI();
 </script>
 </body>
 </html>
