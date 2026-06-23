@@ -636,6 +636,10 @@
 </header>
 
 <main class="main">
+  <div id="loading-banner" style="text-align:center;padding:2rem;color:var(--text3);font-size:14px">
+    ⏳ 連線中，請稍候…
+  </div>
+  <div id="app-content" style="display:none">
 
   <div class="tabs">
     <div class="tab active" id="tab-setup" onclick="switchTab('setup')">
@@ -786,6 +790,7 @@
     <div id="history-rounds"></div>
   </div>
 
+  </div>
 </main>
 
 <script>
@@ -817,10 +822,19 @@ function initFirebase() {
     } else {
       state = { members: [], entries: [], paidTransfers: [], archivedRounds: [], categories: ['出遊','軟體訂閱','錄音'], avatarColors: {}, locked: false };
     }
+    // 第一次載入：隱藏 loading，顯示內容
+    const loading = document.getElementById('loading-banner');
+    const content = document.getElementById('app-content');
+    if (loading) loading.style.display = 'none';
+    if (content) content.style.display = 'block';
     // 重新渲染目前的 tab
     const activeTab = document.querySelector('.tab.active');
     const tabName = activeTab ? activeTab.id.replace('tab-','') : 'setup';
     refreshCurrentTab(tabName);
+  }, (error) => {
+    // 連線失敗
+    const loading = document.getElementById('loading-banner');
+    if (loading) loading.innerHTML = '❌ 連線失敗，請重新整理頁面。<br><small style="color:var(--text3)">若持續發生，請確認網路連線或 Firebase 規則是否過期。</small>';
   });
 }
 
