@@ -940,8 +940,22 @@ function renderCatChips() {
   if (!el) return;
   if (!state.categories) state.categories = ['出遊','軟體訂閱','錄音'];
   el.innerHTML = state.categories.map((c) => `
-    <div class="category-pill" data-cat="${esc(c)}" onclick="selectCat(this,'${esc(c)}')">${esc(c)}</div>
+    <div class="category-pill" data-cat="${esc(c)}" onclick="selectCat(this,'${esc(c)}')">
+      ${esc(c)}
+      <span onclick="event.stopPropagation();deleteCategory('${esc(c)}')"
+        style="margin-left:4px;opacity:0.5;font-size:12px;line-height:1;cursor:pointer;font-weight:700"
+        onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">×</span>
+    </div>
   `).join('');
+}
+
+function deleteCategory(name) {
+  state.categories = (state.categories || []).filter(c => c !== name);
+  saveState();
+  renderCatChips();
+  // 如果刪的是「錄音」，收起季別
+  const seasonRow = document.getElementById('season-row');
+  if (name === '錄音' && seasonRow) seasonRow.classList.remove('show');
 }
 
 function selectCat(el, cat) {
